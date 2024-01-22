@@ -54,15 +54,15 @@ def find_all_xml_files(dirname, output_xml_list):
             continue
 
 
-def generate_html_for_parsed(parsed_info, stable_status, toc):
+def generate_html_for_parsed(parsed_info, stable_status, toc, super_toc):
 
-    txt = generate_protocols_html(parsed_info, toc)
+    txt = generate_protocols_html(parsed_info, toc, super_toc)
 
     return txt
 
 
-def generate_protocols_html(parsed_info, toc):
-
+def generate_protocols_html(parsed_info, toc, super_toc):
+    
     ret = lxml.etree.Element('div')
 
     protocols = parsed_info['parsed'].xpath('/protocol')
@@ -84,9 +84,36 @@ def generate_protocols_html(parsed_info, toc):
     for protocol in protocols:
 
         idname_1 = protocol.get('name', '(noname)')
+        super_idname_1 = 'superid-'+idname_1
 
-        toc.append(LBE.div({'class': 'level1'}, LBE.a(
-            {'href': '#'+idname_1}, 'p: '+idname_1)))
+        toc.append(
+            LBE.div(
+                {
+                    'class': 'level1',
+                    'id':super_idname_1
+                },
+                LBE.a(
+                    {
+                        'href': '#'+idname_1
+                    },
+                    'p: '+idname_1
+                )
+            )
+        )
+
+        super_toc.append(
+            LBE.div(
+                {
+                    'class': 'level1',
+                },
+                LBE.a(
+                    {
+                        'href': '#'+super_idname_1
+                    },
+                    idname_1
+                )
+            )
+        )
 
         protocol_div = lxml.etree.Element('div', {'id': idname_1})
         protocol_div_name = LBE.div('{}'.format(protocol.get(
@@ -332,19 +359,21 @@ def generate_html(parsed_docs):
     body = lxml.etree.Element('body')
     main_div = LBE.div('', {'id': 'main-div'})
     toc = LBE.div('', {'id': 'toc-div'})
+    super_toc = LBE.div('', {'id': 'supertoc-div'})
+    body.append(super_toc)
     body.append(toc)
     body.append(main_div)
 
     for i in stable:
-        x = generate_html_for_parsed(parsed_docs[i], 'stable', toc)
+        x = generate_html_for_parsed(parsed_docs[i], 'stable', toc, super_toc)
         main_div.append(x)
 
     for i in staging:
-        x = generate_html_for_parsed(parsed_docs[i], 'staging', toc)
+        x = generate_html_for_parsed(parsed_docs[i], 'staging', toc, super_toc)
         main_div.append(x)
 
     for i in unstable:
-        x = generate_html_for_parsed(parsed_docs[i], 'unstable', toc)
+        x = generate_html_for_parsed(parsed_docs[i], 'unstable', toc, super_toc)
         main_div.append(x)
 
     html_struct = LBE.html(
@@ -352,12 +381,19 @@ def generate_html(parsed_docs):
             LBE.title("Wayland Protocols Documentation"),
             LBE.style('''
             body { font-size: 10px; font-family: "Go Mono"; margin: 0; padding: 0;}
-            #main-div {margin-left: 200px; margin-right: 10px;}
+            #main-div {margin-left: 210px; margin-right: 210px;}
             #main-div table { font-size: 10px; font-family: "Go Mono"; }
             #main-div div { margin-left: 10px; }
-            #toc-div {
+            #supertoc-div {
                    position: fixed;
                    top: 0px; left: 0px; bottom: 0px; width: 200px;
+                   overflow: scroll; padding-top: 20px; padding-bottom: 20px;
+                   text-wrap: nowrap;white-space: nowrap;
+                   border: 5px black dotted;
+                }
+            #toc-div {
+                   position: fixed;
+                   top: 0px; right: 0px; bottom: 0px; width: 200px;
                    overflow: scroll; padding-top: 20px; padding-bottom: 20px;
                    text-wrap: nowrap;white-space: nowrap;
                    border: 5px black dotted;
