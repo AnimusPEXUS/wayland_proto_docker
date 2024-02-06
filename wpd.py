@@ -1,7 +1,158 @@
 import sys
 import os.path
 import lxml.etree
+import getopt
 from lxml.builder import E as LBE
+
+import yaml
+import json
+
+# from yaml import load, dump
+# from yaml import Loader, Dumper
+
+DATA_TYPES = ['int', 'uint', 'fixed', 'object',
+              'new_id', 'string', 'array', 'fd', 'enum']
+
+
+def apply_name_ver_descrs_from_element_to_object(obj, element):
+
+    obj.name = element.get('name', '(no name)')
+
+    descrs = element.xpath('description')
+    if len(descrs) != 0:
+        descr = descrs[0]
+        t = descr.text
+        if t is None:
+            t = ""
+        obj.description = t.strip()
+        obj.description_summary = element.get(
+            'summary', '(no summary)').strip()
+
+
+def apply_args_to_object(obj, element):
+    args = element.xpath('arg')
+    for arg in args:
+        arg_o = Argument()
+        arg_o.name = arg.get('name', '(no name)')
+        arg_o.type_ = arg.get('type', '(no type)')
+        arg_o.interface = arg.get('interface', '(no interface)')
+        arg_o.summary = arg.get('summary', '(no summary)')
+
+        obj.arguments.append(arg_o)
+
+
+def arguments_simple_struct(requset_or_event):
+
+    ret = []
+
+    for arg in requset_or_event.arguments:
+
+        arg_value = []
+
+        arg_value.append(['name', arg.name])
+        arg_value.append(['type', arg.type_])
+        arg_value.append(['interface', arg.interface])
+        arg_value.append(['summary', arg.summary])
+
+        ret.append(arg_value)
+
+    return ret
+
+
+def entries_simple_struct(enum):
+
+    ret = []
+
+    for entry in enum.entries:
+
+        entry_value = []
+
+        entry_value.append(['name', entry.name])
+        entry_value.append(['value', entry.value])
+        entry_value.append(['summary', entry.summary])
+
+        ret.append(entry_value)
+
+    return ret
+
+
+def common_fields_from_obj_to_simple_struct(lst, obj):
+    lst.append(['name', obj.name])
+    lst.append(['description_summary', obj.description_summary])
+    lst.append(['description', obj.description])
+
+
+class CommonFields:
+
+    def __init__(self):
+        self.name = ''
+        self.description_summary = ''
+        self.description = ''
+
+
+class ProtocolCollection(CommonFields):
+
+    def __init__(self):
+        super().__init__()
+        self.protocols = []
+
+
+class Protocol(CommonFields):
+
+    def __init__(self):
+        super().__init__()
+        self.basename = ''
+        self.dirname = ''
+        # self.status = 'unstable'
+        self.interfaces = []
+
+
+class Interface(CommonFields):
+
+    def __init__(self):
+        super().__init__()
+        self.version = '0'
+        self.requests = []
+        self.events = []
+        self.enums = []
+
+
+class Message(CommonFields):
+
+    def __init__(self):
+        super().__init__()
+        self.arguments = []
+
+
+class Request(Message):
+    pass
+
+
+class Event(Message):
+    pass
+
+
+class Enum(CommonFields):
+
+    def __init__(self):
+        super().__init__()
+        self.entries = []
+
+
+class Argument:
+
+    def __init__(self):
+        self.name = ''
+        self.type_ = ''
+        self.interface = ''
+        self.summary = ''
+
+
+class Entry:
+    def __init__(self):
+        self.name = ''
+        self.value = ''
+        self.summary = ''
 
 
 def parse_xml(filename, output_dict):
@@ -16,6 +167,7 @@ def parse_xml(filename, output_dict):
             parsed = lxml.etree.fromstring(txt)
     except Exception as e:
         print("can't open, read and parse file. error: {}".format(e))
+        print("^^^^ skipping ^^^^: {}".format(filename))
         return
 
     check_ok = False
@@ -28,9 +180,16 @@ def parse_xml(filename, output_dict):
 
     if check_ok:
         parsed_info = dict()
-        parsed_info['dirname'] = os.path.dirname(filename)
+        # parsed_info['name'] = proto_name
+        parsed_info['dirname'] = os.path.relpath(
+            os.path.dirname(filename),
+            os.path.dirname(
+                os.path.abspath(sys.argv[0])
+            )
+        )
         parsed_info['basename'] = os.path.basename(filename)
         parsed_info['parsed'] = parsed
+        
         output_dict[proto_name] = parsed_info
 
 
@@ -54,7 +213,7 @@ def find_all_xml_files(dirname, output_xml_list):
             continue
 
 
-def generate_html_for_parsed(parsed_info, stable_status, toc, super_toc):
+def generate_html_for_parsed(parsed_info, toc, super_toc):
 
     txt = generate_protocols_html(parsed_info, toc, super_toc)
 
@@ -62,7 +221,7 @@ def generate_html_for_parsed(parsed_info, stable_status, toc, super_toc):
 
 
 def generate_protocols_html(parsed_info, toc, super_toc):
-    
+
     ret = lxml.etree.Element('div')
 
     protocols = parsed_info['parsed'].xpath('/protocol')
@@ -90,7 +249,7 @@ def generate_protocols_html(parsed_info, toc, super_toc):
             LBE.div(
                 {
                     'class': 'level1',
-                    'id':super_idname_1
+                    'id': super_idname_1
                 },
                 LBE.a(
                     {
@@ -339,7 +498,7 @@ def generate_protocols_html(parsed_info, toc, super_toc):
                         enum_div.append(args_table)
                     enums_div.append(enum_div)
                 interface_div.append(enums_div)
-                
+
             interfaces_div.append(interface_div)
 
         protocol_div.append(interfaces_div)
@@ -347,6 +506,187 @@ def generate_protocols_html(parsed_info, toc, super_toc):
 
     ret.append(protocols_div)
 
+    return ret
+
+
+def generate_ProtocolCollection(parsed_docs):
+
+    # stable, staging, unstable = stable_unstable_sort(parsed_docs)
+
+    sorted_proto_name_list = gen_sorted_proto_name_list(parsed_docs)
+
+    ret = ProtocolCollection()
+
+    for i in sorted_proto_name_list:
+        protos = generate_protocols_struct_list_for_parsed(parsed_docs[i])
+        for proto in protos:
+            ret.protocols.append(proto)
+
+    return ret
+
+
+def generate_protocols_struct_list_for_parsed(parsed_info):
+
+    ret = []
+
+    protocols = parsed_info['parsed'].xpath('/protocol')
+
+    if len(protocols) == 0:
+        return None
+
+    for protocol in protocols:
+
+        prot_o = Protocol()
+
+        apply_name_ver_descrs_from_element_to_object(prot_o, protocol)
+
+        prot_o.basename=parsed_info['basename']
+        prot_o.dirname=parsed_info['dirname']
+        # prot_o.status=parsed_info['status']
+
+        interfaces = protocol.xpath('interface')
+
+        for interface in interfaces:
+
+            interf_o = Interface()
+
+            apply_name_ver_descrs_from_element_to_object(interf_o, interface)
+
+            interf_o.version = interface.get('version', '0')
+
+            interf_o.requests = []
+            interf_o.events = []
+            interf_o.enums = []
+
+            requests = interface.xpath('request')
+            for request in requests:
+                request_o = Request()
+                apply_name_ver_descrs_from_element_to_object(
+                    request_o, request)
+                apply_args_to_object(request_o, request)
+                interf_o.requests.append(request_o)
+
+            events = interface.xpath('event')
+            for event in events:
+                event_o = Event()
+                apply_name_ver_descrs_from_element_to_object(event_o, event)
+                apply_args_to_object(event_o, event)
+                interf_o.events.append(event_o)
+
+            enums = interface.xpath('enum')
+            for enum in enums:
+                enum_o = Enum()
+
+                apply_name_ver_descrs_from_element_to_object(enum_o, enum)
+
+                entrys = enum.xpath('entry')
+                for entry in entrys:
+                    entry_o = Entry()
+                    entry_o.name = entry.get('name', '(no name)')
+                    entry_o.value = entry.get('value', '(no value)')
+                    entry_o.summary = entry.get('summary', '(no summary)')
+
+                    enum_o.entries.append(entry_o)
+
+                interf_o.enums.append(enum_o)
+
+            prot_o.interfaces.append(interf_o)
+
+        ret.append(prot_o)
+
+    return ret
+
+
+def generate_simple_struct(list_of_Protocols):
+
+    # note: here are intentionally used list of tuples and not OrderedDict.
+    #       order is important in wayland's requests, events and arguments
+
+    proto_od = []
+
+    for protocol in list_of_Protocols.protocols:
+
+        proto_tuple_list = []
+
+        common_fields_from_obj_to_simple_struct(proto_tuple_list, protocol)
+
+        proto_tuple_list.append(['basename', protocol.basename])
+        proto_tuple_list.append(['dirname', protocol.dirname])
+        #proto_tuple_list.append(['status', protocol.status])
+
+        interfs_tuple_list = []
+        proto_tuple_list.append(['interfaces', interfs_tuple_list])
+
+        for interface in protocol.interfaces:
+
+            interf_tuple_list = []
+            common_fields_from_obj_to_simple_struct(
+                interf_tuple_list, interface)
+
+            interf_tuple_list.append(['version', interface.version])
+
+            # work with requests
+
+            reqs_tuple_list = []
+            interf_tuple_list.append(['requests', reqs_tuple_list])
+
+            for request in interface.requests:
+
+                req_tuple_list = []
+                common_fields_from_obj_to_simple_struct(
+                    req_tuple_list, request)
+
+                req_tuple_list.append(
+                    ['args', arguments_simple_struct(request)])
+
+                reqs_tuple_list.append(req_tuple_list)
+
+            # work with events
+
+            eves_tuple_list = []
+            interf_tuple_list.append(['events', eves_tuple_list])
+
+            for event in interface.events:
+
+                eve_tuple_list = []
+                common_fields_from_obj_to_simple_struct(eve_tuple_list, event)
+
+                eve_tuple_list.append(
+                    ['args', arguments_simple_struct(event)])
+
+                eves_tuple_list.append(eve_tuple_list)
+
+            # work with enums
+
+            enus_tuple_list = []
+            interf_tuple_list.append(['enums', enus_tuple_list])
+
+            for enum in interface.enums:
+
+                enu_tuple_list = []
+                common_fields_from_obj_to_simple_struct(enu_tuple_list, enum)
+
+                enu_tuple_list.append(
+                    ['entries', entries_simple_struct(enum)])
+
+                enus_tuple_list.append(enu_tuple_list)
+
+            # end of works
+
+            interfs_tuple_list.append(interf_tuple_list)
+
+        proto_od.append(proto_tuple_list)
+
+    return proto_od
+
+
+def generate_yaml(simple_struct):
+    ret = yaml.dump(simple_struct, Dumper=yaml.Dumper)
+    return ret
+
+
+def generate_json(simple_struct):
+    ret = json.dumps(simple_struct, indent=4)
     return ret
 
 
@@ -373,7 +713,8 @@ def generate_html(parsed_docs):
         main_div.append(x)
 
     for i in unstable:
-        x = generate_html_for_parsed(parsed_docs[i], 'unstable', toc, super_toc)
+        x = generate_html_for_parsed(
+            parsed_docs[i], 'unstable', toc, super_toc)
         main_div.append(x)
 
     html_struct = LBE.html(
@@ -415,7 +756,7 @@ def generate_html(parsed_docs):
             .args-table td { padding-left: 10px; padding-right: 10px; border: 1px gray solid; box-shadow: 2px 2px 0px teal;}
             .args-table th { text-align: left; }
             .arg-name { }
-            
+
             '''),
         ),
         body
@@ -434,6 +775,23 @@ def calc_doc_stability(name, parsed_info):
 
     return 'unstable'
 
+
+def gen_sorted_proto_name_list(parsed_docs):
+    order_list = ['wayland']
+
+    ret = []
+
+    for i in order_list:
+        ret.append(i)
+
+    names = list(parsed_docs.keys())
+    names.sort()
+        
+    for i in names:
+        if not i in order_list:
+            ret.append(i)
+        
+    return ret
 
 def stable_unstable_sort(parsed_docs):
     order_list = ['wayland']
@@ -483,6 +841,33 @@ def stable_unstable_sort(parsed_docs):
     return stable, staging, unstable
 
 
+def print_help():
+    print(
+        """
+{cmd} [options] target
+
+  recurcively searches for .xml files in current directory and trying to
+  find wayland protocols in them.
+
+  -o  filename    - where to store. of omitted - generated automatically
+
+  valid targets:
+
+     html      - (default) generates index.html with /readabale/ documentation
+
+     yaml      - generates yaml document with yaml representation
+                 of all found .xml protocols
+
+     json      - same as yaml, but generates json
+
+     c or c++  - generates C/C++ compatible .h (or .hpp) include file
+                 to be included in waylandcc project
+                 (see https://github.com/AnimusPEXUS/waylandcc).
+                 (generated file' contents is identical, just
+                  extension in filename is different)
+""".format(cmd=sys.argv[0]))
+
+
 def main():
 
     argv = sys.argv
@@ -494,19 +879,83 @@ def main():
     if argv[0] == '-c':
         raise RuntimeError("this must be run as script")
 
+    opts, args = getopt.getopt(argv[1:], 'o:h', ['help'])
+
+    output = ''
+    for i in opts:
+        if i[0] == '-o:':
+            output = i[1]
+        if i[0] in ['-h', '--help']:
+            print_help()
+            return
+
+    target = args[0]
+
+    acceptable_targets = ['html', 'yaml', 'json']
+
+    if not target in acceptable_targets:
+        raise RuntimeError(
+            "invalid target. valid are {}".format(acceptable_targets))
+
+    if output == '':
+        if target == 'html':
+            output = 'index.html'
+        elif target == 'yaml':
+            output = 'wayland-protocols.yaml'
+        elif target == 'json':
+            output = 'wayland-protocols.json'
+        else:
+            raise RuntimeError("invalid target")
+
+    print(f"target is {target}. output file is {output}")
+
+    if len(args) != 1:
+        raise RuntimeError("invalid arg count")
+
     cwd = os.path.dirname(os.path.abspath(argv[0]))
 
     xml_files = []
     find_all_xml_files(cwd, xml_files)
 
+    print("parsing xml")
     parsed_docs = dict()
     for i in xml_files:
         parse_xml(i, parsed_docs)
 
-    txt = generate_html(parsed_docs)
+    if target == 'html':
 
-    with open('index.html', 'wb') as f:
-        f.write(txt)
+        txt = generate_html(parsed_docs)
+
+        with open(output, 'wb') as f:
+            f.write(txt)
+
+        return
+
+    elif target == 'yaml':
+
+        obj_tree = generate_ProtocolCollection(parsed_docs)
+
+        struct = generate_simple_struct(obj_tree)
+
+        txt = generate_yaml(struct)
+
+        with open(output, 'w') as f:
+            f.write(txt)
+
+        return
+
+    elif target == 'json':
+
+        obj_tree = generate_ProtocolCollection(parsed_docs)
+
+        struct = generate_simple_struct(obj_tree)
+
+        txt = generate_json(struct)
+
+        with open(output, 'w') as f:
+            f.write(txt)
+
+        return
 
 
 if __name__ == '__main__':
