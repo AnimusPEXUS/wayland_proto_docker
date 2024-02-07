@@ -25,7 +25,7 @@ def apply_name_ver_descrs_from_element_to_object(obj, element):
         if t is None:
             t = ""
         obj.description = t.strip()
-        obj.description_summary = element.get(
+        obj.description_summary = descr.get(
             'summary', '(no summary)').strip()
 
 
@@ -189,7 +189,7 @@ def parse_xml(filename, output_dict):
         )
         parsed_info['basename'] = os.path.basename(filename)
         parsed_info['parsed'] = parsed
-        
+
         output_dict[proto_name] = parsed_info
 
 
@@ -421,6 +421,7 @@ def generate_protocols_html(parsed_info, toc, super_toc):
                             LBE.tr(
                                 LBE.th('arg name'),
                                 LBE.th('type'),
+                                LBE.th('interface'),
                                 LBE.th('summary'),
                             ),
                             {'class': 'args-table'}
@@ -430,6 +431,7 @@ def generate_protocols_html(parsed_info, toc, super_toc):
                                 LBE.td(LBE.b(arg.get('name', '(no name)'),
                                        {'class': 'arg-name'})),
                                 LBE.td(arg.get('type', '(no)')),
+                                LBE.td(arg.get('interface', '(no)')),
                                 LBE.td(arg.get('summary', '(no)')),
 
                             )
@@ -540,8 +542,8 @@ def generate_protocols_struct_list_for_parsed(parsed_info):
 
         apply_name_ver_descrs_from_element_to_object(prot_o, protocol)
 
-        prot_o.basename=parsed_info['basename']
-        prot_o.dirname=parsed_info['dirname']
+        prot_o.basename = parsed_info['basename']
+        prot_o.dirname = parsed_info['dirname']
         # prot_o.status=parsed_info['status']
 
         interfaces = protocol.xpath('interface')
@@ -612,7 +614,7 @@ def generate_simple_struct(list_of_Protocols):
 
         proto_tuple_list.append(['basename', protocol.basename])
         proto_tuple_list.append(['dirname', protocol.dirname])
-        #proto_tuple_list.append(['status', protocol.status])
+        # proto_tuple_list.append(['status', protocol.status])
 
         interfs_tuple_list = []
         proto_tuple_list.append(['interfaces', interfs_tuple_list])
@@ -692,8 +694,10 @@ def generate_json(simple_struct):
 
 def generate_html(parsed_docs):
 
-    stable, staging, unstable = stable_unstable_sort(parsed_docs)
+    # stable, staging, unstable = stable_unstable_sort(parsed_docs)
 
+    sorted_proto_name_list = gen_sorted_proto_name_list(parsed_docs)
+    
     texts = ''
 
     body = lxml.etree.Element('body')
@@ -704,17 +708,8 @@ def generate_html(parsed_docs):
     body.append(toc)
     body.append(main_div)
 
-    for i in stable:
-        x = generate_html_for_parsed(parsed_docs[i], 'stable', toc, super_toc)
-        main_div.append(x)
-
-    for i in staging:
-        x = generate_html_for_parsed(parsed_docs[i], 'staging', toc, super_toc)
-        main_div.append(x)
-
-    for i in unstable:
-        x = generate_html_for_parsed(
-            parsed_docs[i], 'unstable', toc, super_toc)
+    for i in sorted_proto_name_list:
+        x = generate_html_for_parsed(parsed_docs[i], toc, super_toc)
         main_div.append(x)
 
     html_struct = LBE.html(
@@ -722,7 +717,16 @@ def generate_html(parsed_docs):
             LBE.title("Wayland Protocols Documentation"),
             LBE.style('''
             body { font-size: 10px; font-family: "Go Mono"; margin: 0; padding: 0;}
-            #main-div {margin-left: 210px; margin-right: 210px;}
+            #main-div {
+                position: absolute;
+                left: 210px;
+                right: 210px;
+                top: 0px;
+                bottom: 0px;
+                overflow: scroll;
+                padding-left: 20px;
+                padding-right: 20px;
+                }
             #main-div table { font-size: 10px; font-family: "Go Mono"; }
             #main-div div { margin-left: 10px; }
             #supertoc-div {
@@ -786,12 +790,13 @@ def gen_sorted_proto_name_list(parsed_docs):
 
     names = list(parsed_docs.keys())
     names.sort()
-        
+
     for i in names:
         if not i in order_list:
             ret.append(i)
-        
+
     return ret
+
 
 def stable_unstable_sort(parsed_docs):
     order_list = ['wayland']
@@ -849,7 +854,7 @@ def print_help():
   recurcively searches for .xml files in current directory and trying to
   find wayland protocols in them.
 
-  -o  filename    - where to store. of omitted - generated automatically
+  -o  filename    - where to store. if omitted - generated automatically
 
   valid targets:
 
