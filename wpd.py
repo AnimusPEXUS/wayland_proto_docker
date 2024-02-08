@@ -10,23 +10,142 @@ import json
 # from yaml import load, dump
 # from yaml import Loader, Dumper
 
-DATA_TYPES = ['int', 'uint', 'fixed', 'object',
-              'new_id', 'string', 'array', 'fd', 'enum']
+DATA_TYPES = [
+    'int', 'uint', 'fixed', 'object',
+    'new_id', 'string', 'array', 'fd', 'enum'
+]
 
 
-def apply_name_ver_descrs_from_element_to_object(obj, element):
+def apply_common_fields_to_object_from_element(obj, element):
 
     obj.name = element.get('name', '(no name)')
 
+    descr_os = []
     descrs = element.xpath('description')
-    if len(descrs) != 0:
-        descr = descrs[0]
+
+    for descr in descrs:
         t = descr.text
         if t is None:
             t = ""
-        obj.description = t.strip()
-        obj.description_summary = descr.get(
-            'summary', '(no summary)').strip()
+        d = Description()
+        d.text = t.strip()
+        d.summary = descr.get('summary', '').strip()
+
+        descr_os.append(d)
+
+    obj.descriptions = descr_os
+
+    copy_os = []
+    copys = element.xpath('copyright')
+
+    for copy in copys:
+        t = copy.text
+        if t is None:
+            t = ""
+
+        copy_os.append(t)
+
+    obj.copyrights = copy_os
+
+
+def gen_descriptions_html(descriptions):
+
+    descriptions_div = LBE.div('')
+
+    for descr in descriptions:
+        descriptions_div.append(
+            LBE.div(
+                LBE.div('summary: ', descr.summary),
+                LBE.div('description: ', descr.text,
+                        {'class': 'description-div'})
+            )
+        )
+    return descriptions_div
+
+
+def gen_messages_html(messages, toc, idname_2, mode='requests'):
+
+    single_txt = 'request'
+    short_txt = 'req'
+    if mode == 'requests':
+        pass
+    elif mode == 'events':
+        single_txt = 'event'
+        short_txt = 'eve'
+    elif mode == 'enums':
+        single_txt = 'enum'
+        short_txt = 'enu'
+    else:
+        raise RuntimeError("invalid 'mode' arg")
+
+    multiple_txt = '{}s'.format(single_txt)
+
+    messages_div = LBE.div('', {'class': multiple_txt+'-div'})
+    for message in messages:
+
+        n = message.name
+        idname_3 = idname_2 + '-'+short_txt+'-' + n
+
+        toc.append(LBE.div({'class': 'level3'}, LBE.a(
+            {'href': '#'+idname_3}, short_txt+': '+n)))
+
+        message_div = LBE.div(
+            single_txt+": ",
+            LBE.b(
+                message.name,
+                {'class': single_txt+'-name'}
+            ),
+            {'id': idname_3}
+        )
+
+        message_div.append(gen_descriptions_html(message.descriptions))
+
+        if mode in ['requests', 'events']:
+            args = message.arguments
+            if len(args) > 0:
+                args_table = LBE.table(
+                    LBE.tr(
+                        LBE.th('arg name'),
+                        LBE.th('type'),
+                        LBE.th('interface'),
+                        LBE.th('summary'),
+                    ),
+                    {'class': 'args-table'}
+                )
+                for arg in args:
+                    arg_row = LBE.tr(
+                        LBE.td(LBE.b(arg.name, {'class': 'arg-name'})),
+                        LBE.td(arg.type_),
+                        LBE.td(arg.interface),
+                        LBE.td(arg.summary),
+                    )
+                    args_table.append(arg_row)
+
+                message_div.append(args_table)
+        else:
+            args = message.entries
+            if len(args) > 0:
+                args_table = LBE.table(
+                    LBE.tr(
+                        LBE.th('entry name'),
+                        LBE.th('value'),
+                        LBE.th('summary'),
+                    ),
+                    {'class': 'args-table'}
+                )
+                for arg in args:
+                    arg_row = LBE.tr(
+                        LBE.td(LBE.b(arg.name, {'class': 'arg-name'})),
+                        LBE.td(arg.value),
+                        LBE.td(arg.summary),
+
+                    )
+                    args_table.append(arg_row)
+
+                message_div.append(args_table)
+
+        messages_div.append(message_div)
+    return messages_div
 
 
 def apply_args_to_object(obj, element):
@@ -82,18 +201,41 @@ def common_fields_from_obj_to_simple_struct(lst, obj):
     lst.append(['description', obj.description])
 
 
+class Description:
+
+    def __init__(self):
+        self.text = ''
+        self.summary = ''
+
+
 class CommonFields:
 
     def __init__(self):
         self.name = ''
-        self.description_summary = ''
-        self.description = ''
+        self.descriptions = []
+        self.copyrights = []
 
 
 class ProtocolCollection(CommonFields):
 
     def __init__(self):
         super().__init__()
+        self.protocol_files = []
+
+    def getProtoByName(name):
+        ret = []
+        for i in self.protocol_files:
+            for j in i:
+                if j.name == name:
+                    ret.append(j)
+        return ret
+
+
+class ProtocolFile:
+
+    def __init__(self):
+        self.basename = ''
+        self.dirname = ''
         self.protocols = []
 
 
@@ -101,8 +243,6 @@ class Protocol(CommonFields):
 
     def __init__(self):
         super().__init__()
-        self.basename = ''
-        self.dirname = ''
         # self.status = 'unstable'
         self.interfaces = []
 
@@ -155,9 +295,19 @@ class Entry:
         self.summary = ''
 
 
-def parse_xml(filename, output_dict):
+def parse_xml(filename):
 
     filename = os.path.abspath(filename)
+
+    dirname = os.path.relpath(
+        os.path.dirname(filename),
+        os.path.dirname(
+            os.path.abspath(sys.argv[0])
+        )
+    )
+    basename = os.path.basename(filename)
+
+    key_name = '{}/{}'.format(dirname, basename)
 
     parsed = None
 
@@ -166,31 +316,22 @@ def parse_xml(filename, output_dict):
             txt = f.read()
             parsed = lxml.etree.fromstring(txt)
     except Exception as e:
-        print("can't open, read and parse file. error: {}".format(e))
+        print("can't open, read and/or parse file. error: {}".format(e))
         print("^^^^ skipping ^^^^: {}".format(filename))
-        return
+        return None, None
 
-    check_ok = False
     protocol = parsed.xpath('/protocol')
-    proto_name = None
-    if len(protocol) != 0:
-        proto_name = protocol[0].get('name')
-        if not proto_name is None:
-            check_ok = True
 
-    if check_ok:
-        parsed_info = dict()
-        # parsed_info['name'] = proto_name
-        parsed_info['dirname'] = os.path.relpath(
-            os.path.dirname(filename),
-            os.path.dirname(
-                os.path.abspath(sys.argv[0])
-            )
-        )
-        parsed_info['basename'] = os.path.basename(filename)
-        parsed_info['parsed'] = parsed
+    if len(protocol) == 0:
+        return None, None
 
-        output_dict[proto_name] = parsed_info
+    parsed_info = dict()
+    # parsed_info['name'] = proto_name
+    parsed_info['dirname'] = dirname
+    parsed_info['basename'] = basename
+    parsed_info['parsed'] = parsed
+
+    return key_name, parsed_info
 
 
 def find_all_xml_files(dirname, output_xml_list):
@@ -213,323 +354,146 @@ def find_all_xml_files(dirname, output_xml_list):
             continue
 
 
-def generate_html_for_parsed(parsed_info, toc, super_toc):
+def generate_html_for_ProtocolCollection(protocol_collection, toc, super_toc):
 
-    txt = generate_protocols_html(parsed_info, toc, super_toc)
+    proto_collection_div = LBE.div('')
 
-    return txt
+    for proto_file in protocol_collection.protocol_files:
+
+        proto_file_div = LBE.div('')
+        proto_collection_div.append(proto_file_div)
 
 
-def generate_protocols_html(parsed_info, toc, super_toc):
+        for protocol in proto_file.protocols:
 
-    ret = lxml.etree.Element('div')
+            idname_1 = protocol.name
+            super_idname_1 = 'superid-'+idname_1
 
-    protocols = parsed_info['parsed'].xpath('/protocol')
-
-    if len(protocols) == 0:
-        return ret
-
-    ret.append(
-        LBE.div(
-            '{} protocol(s) in file: {}'.format(
-                len(protocols),
-                os.path.basename(parsed_info['basename'])
-            )
-        )
-    )
-
-    protocols_div = lxml.etree.Element('div')
-
-    for protocol in protocols:
-
-        idname_1 = protocol.get('name', '(noname)')
-        super_idname_1 = 'superid-'+idname_1
-
-        toc.append(
-            LBE.div(
-                {
-                    'class': 'level1',
-                    'id': super_idname_1
-                },
-                LBE.a(
-                    {
-                        'href': '#'+idname_1
-                    },
-                    'p: '+idname_1
-                )
-            )
-        )
-
-        super_toc.append(
-            LBE.div(
-                {
-                    'class': 'level1',
-                },
-                LBE.a(
-                    {
-                        'href': '#'+super_idname_1
-                    },
-                    idname_1
-                )
-            )
-        )
-
-        protocol_div = lxml.etree.Element('div', {'id': idname_1})
-        protocol_div_name = LBE.div('{}'.format(protocol.get(
-            'name', '(noname)')), {'class': 'protocol-name'})
-        protocol_div.append(protocol_div_name)
-
-        interfaces = protocol.xpath('interface')
-
-        interfaces_div = lxml.etree.Element('div')
-        interfaces_div_txt = LBE.div('{} interface(s)'.format(len(interfaces)))
-        interfaces_div.append(interfaces_div_txt)
-
-        for interface in interfaces:
-
-            n = interface.get('name', '(noname)')
-            idname_2 = idname_1 + '-'+n
-
-            toc.append(LBE.div({'class': 'level2'}, LBE.a(
-                {'href': '#'+idname_2}, 'i: '+n)))
-
-            interface_div = lxml.etree.Element('div', {'id': idname_2})
-            interface_div.set('class', 'interface-div')
-            interface_div.append(
+            toc.append(
                 LBE.div(
-                    'interface: ', LBE.b(interface.get('name', 'unknown'), {
-                                         'class': "interface-name"}),
-                    ', version: ', LBE.b(interface.get('version', 'unknown')),
-                    {"class": "interface-title"}
+                    {
+                        'class': 'level1',
+                        'id': super_idname_1
+                    },
+                    LBE.a(
+                        {
+                            'href': '#'+idname_1
+                        },
+                        'p: '+idname_1
+                    )
                 )
             )
 
-            descrs = interface.xpath('description')
-            if len(descrs) != 0:
-                descr = descrs[0]
+            super_toc.append(
+                LBE.div(
+                    {
+                        'class': 'level1',
+                    },
+                    LBE.a(
+                        {
+                            'href': '#'+super_idname_1
+                        },
+                        idname_1
+                    )
+                )
+            )
+
+            protocol_div = lxml.etree.Element('div', {'id': idname_1})
+            proto_file_div.append(protocol_div)
+            protocol_div_name = LBE.div('{}'.format(protocol.name), {
+                                        'class': 'protocol-name'})
+            protocol_div.append(protocol_div_name)
+            protocol_div.append(
+                LBE.div(
+                    "protocol file: {} ; dirname: {}".format(
+                        proto_file.basename,
+                        proto_file.dirname
+                    )
+                )
+            )
+
+            interfaces_div = lxml.etree.Element('div')
+            interfaces_div_txt = LBE.div(
+                '{} interface(s)'.format(len(protocol.interfaces)))
+            interfaces_div.append(interfaces_div_txt)
+
+            for interface in protocol.interfaces:
+
+                n = interface.name
+                idname_2 = idname_1 + '-'+n
+
+                toc.append(LBE.div({'class': 'level2'}, LBE.a(
+                    {'href': '#'+idname_2}, 'i: '+n)))
+
+                interface_div = lxml.etree.Element('div', {'id': idname_2})
+                interface_div.set('class', 'interface-div')
                 interface_div.append(
                     LBE.div(
-                        LBE.div(
-                            LBE.div('summary: ', descr.get(
-                                'summary', '(no summary)')),
-                            LBE.div('description: ', getattr(descr, 'text', '(no descr)'), {
-                                    'class': 'description-div'})
-                        )
+                        'interface: ', LBE.b(interface.name, {
+                                             'class': "interface-name"}),
+                        ', version: ', LBE.b(interface.version),
+                        {"class": "interface-title"}
                     )
                 )
 
-            requests = interface.xpath('request')
-            if len(requests) > 0:
-                requests_div = LBE.div('', {'class': 'requests-div'})
-                for request in requests:
+                interface_div.append(
+                    gen_descriptions_html(interface.descriptions))
 
-                    n = request.get('name', '(noname)')
-                    idname_3 = idname_2 + '-req-' + n
-
-                    toc.append(LBE.div({'class': 'level3'}, LBE.a(
-                        {'href': '#'+idname_3}, 'r: '+n)))
-
-                    request_div = LBE.div(
-                        "request: ",
-                        LBE.b(
-                            request.get('name', 'no name'),
-                            {'class': 'request-name'}
-                        ),
-                        {'id': idname_3}
+                if len(interface.requests) > 0:
+                    interface_div.append(
+                        gen_messages_html(
+                            interface.requests,
+                            toc,
+                            idname_2
+                        )
                     )
 
-                    descrs = request.xpath('description')
-                    if len(descrs) != 0:
-                        descr = descrs[0]
-                        t = descr.text
-                        if t is None:
-                            t = "(do descr)"
-                        request_div.append(
-                            LBE.div(
-                                LBE.div('summary: ', descr.get(
-                                    'summary', '(no summary)')),
-                                # getattr(descr, 'text', '(no descr)')) #)
-                                LBE.div('description: ', t, {
-                                    'class': 'description-div'})
-                            )
+                if len(interface.events) > 0:
+                    interface_div.append(
+                        gen_messages_html(
+                            interface.events,
+                            toc,
+                            idname_2,
+                            mode='events'
                         )
-
-                    args = request.xpath('arg')
-                    if len(args) > 0:
-                        args_table = LBE.table(
-                            LBE.tr(
-                                LBE.th('arg name'),
-                                LBE.th('type'),
-                                LBE.th('interface'),
-                                LBE.th('summary'),
-                            ),
-                            {'class': 'args-table'}
-                        )
-                        for arg in args:
-                            arg_row = LBE.tr(
-                                LBE.td(LBE.b(arg.get('name', '(no name)'),
-                                       {'class': 'arg-name'})),
-                                LBE.td(arg.get('type', '(no)')),
-                                LBE.td(arg.get('interface', '(no)')),
-                                LBE.td(arg.get('summary', '(no)')),
-                            )
-                            args_table.append(arg_row)
-
-                        request_div.append(args_table)
-                    requests_div.append(request_div)
-                interface_div.append(requests_div)
-
-            events = interface.xpath('event')
-            if len(events) > 0:
-                events_div = LBE.div('', {'class': 'events-div'})
-                for event in events:
-
-                    n = event.get('name', '(noname)')
-                    idname_3 = idname_2 + '-ev-' + n
-
-                    toc.append(LBE.div({'class': 'level3'}, LBE.a(
-                        {'href': '#'+idname_3}, 'ev: '+n)))
-
-                    event_div = LBE.div(
-                        "event: ",
-                        LBE.b(
-                            event.get('name', 'no name'),
-                            {'class': 'event-name'}
-                        ),
-                        {'id': idname_3}
                     )
 
-                    descrs = event.xpath('description')
-                    if len(descrs) != 0:
-                        descr = descrs[0]
-                        t = descr.text
-                        if t is None:
-                            t = "(do descr)"
-                        event_div.append(
-                            LBE.div(
-                                LBE.div('summary: ', descr.get(
-                                    'summary', '(no summary)')),
-                                # getattr(descr, 'text', '(no descr)')) #)
-                                LBE.div('description: ', t, {
-                                    'class': 'description-div'})
-                            )
+                if len(interface.enums) > 0:
+                    interface_div.append(
+                        gen_messages_html(
+                            interface.enums,
+                            toc,
+                            idname_2,
+                            mode='enums'
                         )
-
-                    args = event.xpath('arg')
-                    if len(args) > 0:
-                        args_table = LBE.table(
-                            LBE.tr(
-                                LBE.th('arg name'),
-                                LBE.th('type'),
-                                LBE.th('interface'),
-                                LBE.th('summary'),
-                            ),
-                            {'class': 'args-table'}
-                        )
-                        for arg in args:
-                            arg_row = LBE.tr(
-                                LBE.td(LBE.b(arg.get('name', '(no name)'),
-                                       {'class': 'arg-name'})),
-                                LBE.td(arg.get('type', '(no)')),
-                                LBE.td(arg.get('interface', '(no)')),
-                                LBE.td(arg.get('summary', '(no)')),
-
-                            )
-                            args_table.append(arg_row)
-
-                        event_div.append(args_table)
-                    events_div.append(event_div)
-                interface_div.append(events_div)
-
-            enums = interface.xpath('enum')
-            if len(enums) > 0:
-                enums_div = LBE.div('', {'class': 'enums-div'})
-                for enum in enums:
-
-                    n = enum.get('name', '(noname)')
-                    idname_3 = idname_2 + '-en-' + n
-
-                    toc.append(LBE.div({'class': 'level3'}, LBE.a(
-                        {'href': '#'+idname_3}, 'en: '+n)))
-
-                    enum_div = LBE.div(
-                        "enum: ",
-                        LBE.b(
-                            enum.get('name', 'no name'),
-                            {'class': 'enum-name'}
-                        ),
-                        {'id': idname_3}
                     )
 
-                    descrs = enum.xpath('description')
-                    if len(descrs) != 0:
-                        descr = descrs[0]
-                        t = descr.text
-                        if t is None:
-                            t = "(do descr)"
-                        enum_div.append(
-                            LBE.div(
-                                LBE.div('summary: ', descr.get(
-                                    'summary', '(no summary)')),
-                                # getattr(descr, 'text', '(no descr)')) #)
-                                LBE.div('description: ', t, {
-                                    'class': 'description-div'})
-                            )
-                        )
+                interfaces_div.append(interface_div)
 
-                    args = enum.xpath('entry')
-                    if len(args) > 0:
-                        args_table = LBE.table(
-                            LBE.tr(
-                                LBE.th('entry name'),
-                                LBE.th('value'),
-                                LBE.th('summary'),
-                            ),
-                            {'class': 'args-table'}
-                        )
-                        for arg in args:
-                            arg_row = LBE.tr(
-                                LBE.td(LBE.b(arg.get('name', '(no name)'),
-                                       {'class': 'arg-name'})),
-                                LBE.td(arg.get('value', '(no)')),
-                                LBE.td(arg.get('summary', '(no)')),
+            protocol_div.append(interfaces_div)
 
-                            )
-                            args_table.append(arg_row)
-
-                        enum_div.append(args_table)
-                    enums_div.append(enum_div)
-                interface_div.append(enums_div)
-
-            interfaces_div.append(interface_div)
-
-        protocol_div.append(interfaces_div)
-        protocols_div.append(protocol_div)
-
-    ret.append(protocols_div)
-
-    return ret
+    return proto_collection_div
 
 
 def generate_ProtocolCollection(parsed_docs):
 
     # stable, staging, unstable = stable_unstable_sort(parsed_docs)
 
-    sorted_proto_name_list = gen_sorted_proto_name_list(parsed_docs)
-
     ret = ProtocolCollection()
 
-    for i in sorted_proto_name_list:
-        protos = generate_protocols_struct_list_for_parsed(parsed_docs[i])
-        for proto in protos:
-            ret.protocols.append(proto)
+    for i in parsed_docs:
+        pf = generate_ProtocolFile_for_parsed(parsed_docs[i])
+        if pf is not None:
+            ret.protocol_files.append(pf)
 
     return ret
 
 
-def generate_protocols_struct_list_for_parsed(parsed_info):
+def generate_ProtocolFile_for_parsed(parsed_info):
 
-    ret = []
+    protocol_file = ProtocolFile()
+    protocol_file.basename = parsed_info['basename']
+    protocol_file.dirname = parsed_info['dirname']
 
     protocols = parsed_info['parsed'].xpath('/protocol')
 
@@ -540,10 +504,8 @@ def generate_protocols_struct_list_for_parsed(parsed_info):
 
         prot_o = Protocol()
 
-        apply_name_ver_descrs_from_element_to_object(prot_o, protocol)
+        apply_common_fields_to_object_from_element(prot_o, protocol)
 
-        prot_o.basename = parsed_info['basename']
-        prot_o.dirname = parsed_info['dirname']
         # prot_o.status=parsed_info['status']
 
         interfaces = protocol.xpath('interface')
@@ -552,7 +514,7 @@ def generate_protocols_struct_list_for_parsed(parsed_info):
 
             interf_o = Interface()
 
-            apply_name_ver_descrs_from_element_to_object(interf_o, interface)
+            apply_common_fields_to_object_from_element(interf_o, interface)
 
             interf_o.version = interface.get('version', '0')
 
@@ -563,7 +525,7 @@ def generate_protocols_struct_list_for_parsed(parsed_info):
             requests = interface.xpath('request')
             for request in requests:
                 request_o = Request()
-                apply_name_ver_descrs_from_element_to_object(
+                apply_common_fields_to_object_from_element(
                     request_o, request)
                 apply_args_to_object(request_o, request)
                 interf_o.requests.append(request_o)
@@ -571,7 +533,7 @@ def generate_protocols_struct_list_for_parsed(parsed_info):
             events = interface.xpath('event')
             for event in events:
                 event_o = Event()
-                apply_name_ver_descrs_from_element_to_object(event_o, event)
+                apply_common_fields_to_object_from_element(event_o, event)
                 apply_args_to_object(event_o, event)
                 interf_o.events.append(event_o)
 
@@ -579,7 +541,7 @@ def generate_protocols_struct_list_for_parsed(parsed_info):
             for enum in enums:
                 enum_o = Enum()
 
-                apply_name_ver_descrs_from_element_to_object(enum_o, enum)
+                apply_common_fields_to_object_from_element(enum_o, enum)
 
                 entrys = enum.xpath('entry')
                 for entry in entrys:
@@ -594,9 +556,9 @@ def generate_protocols_struct_list_for_parsed(parsed_info):
 
             prot_o.interfaces.append(interf_o)
 
-        ret.append(prot_o)
+        protocol_file.protocols.append(prot_o)
 
-    return ret
+    return protocol_file
 
 
 def generate_simple_struct(list_of_Protocols):
@@ -692,12 +654,12 @@ def generate_json(simple_struct):
     return ret
 
 
-def generate_html(parsed_docs):
+def generate_html(obj_tree):
 
     # stable, staging, unstable = stable_unstable_sort(parsed_docs)
 
-    sorted_proto_name_list = gen_sorted_proto_name_list(parsed_docs)
-    
+    # sorted_proto_name_list = gen_sorted_proto_name_list(parsed_docs)
+
     texts = ''
 
     body = lxml.etree.Element('body')
@@ -708,9 +670,8 @@ def generate_html(parsed_docs):
     body.append(toc)
     body.append(main_div)
 
-    for i in sorted_proto_name_list:
-        x = generate_html_for_parsed(parsed_docs[i], toc, super_toc)
-        main_div.append(x)
+    main_div.append(generate_html_for_ProtocolCollection(
+        obj_tree, toc, super_toc))
 
     html_struct = LBE.html(
         LBE.head(
@@ -925,11 +886,17 @@ def main():
     print("parsing xml")
     parsed_docs = dict()
     for i in xml_files:
-        parse_xml(i, parsed_docs)
+        k, v = parse_xml(i)
+        if k is not None and v is not None:
+            parsed_docs[k] = v
+
+    obj_tree = generate_ProtocolCollection(parsed_docs)
+
+    del parsed_docs
 
     if target == 'html':
 
-        txt = generate_html(parsed_docs)
+        txt = generate_html(obj_tree)
 
         with open(output, 'wb') as f:
             f.write(txt)
@@ -937,8 +904,6 @@ def main():
         return
 
     elif target == 'yaml':
-
-        obj_tree = generate_ProtocolCollection(parsed_docs)
 
         struct = generate_simple_struct(obj_tree)
 
@@ -951,8 +916,6 @@ def main():
 
     elif target == 'json':
 
-        obj_tree = generate_ProtocolCollection(parsed_docs)
-
         struct = generate_simple_struct(obj_tree)
 
         txt = generate_json(struct)
@@ -961,6 +924,9 @@ def main():
             f.write(txt)
 
         return
+
+    else:
+        raise RuntimeError("invalid target")
 
 
 if __name__ == '__main__':
