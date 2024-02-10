@@ -479,7 +479,8 @@ def generate_html_for_ProtocolCollection(protocol_collection, toc, super_toc):
                 )
             )
 
-            protocol_div = lxml.etree.Element('div', {'id': idname_1})
+            protocol_div = lxml.etree.Element(
+                'div', {'id': idname_1, 'class': 'protocol-div'})
             proto_file_div.append(protocol_div)
             protocol_div_name = LBE.div('{}'.format(protocol.name), {
                                         'class': 'protocol-name'})
@@ -506,8 +507,8 @@ def generate_html_for_ProtocolCollection(protocol_collection, toc, super_toc):
                 toc.append(LBE.div({'class': 'level2'}, LBE.a(
                     {'href': '#'+idname_2}, 'i: '+n)))
 
-                interface_div = lxml.etree.Element('div', {'id': idname_2})
-                interface_div.set('class', 'interface-div')
+                interface_div = LBE.div(
+                    '', {'id': idname_2, 'class': 'interface-div'})
                 interface_div.append(
                     LBE.div(
                         'interface: ', LBE.b(interface.name, {
@@ -751,8 +752,9 @@ def generate_html(obj_tree):
     body.append(toc)
     body.append(main_div)
 
-    main_div.append(generate_html_for_ProtocolCollection(
-        obj_tree, toc, super_toc))
+    main_div.append(
+        generate_html_for_ProtocolCollection(obj_tree, toc, super_toc)
+    )
 
     html_struct = LBE.html(
         LBE.head(
@@ -770,7 +772,7 @@ def generate_html(obj_tree):
                 padding-right: 20px;
                 }
             #main-div table { font-size: 10px; font-family: "Go Mono"; }
-            #main-div div { margin-left: 10px; }
+            #main-div div {  }
             #supertoc-div {
                    position: fixed;
                    top: 0px; left: 0px; bottom: 0px; width: 200px;
@@ -791,7 +793,14 @@ def generate_html(obj_tree):
             #toc-div .level1 a {color: red;}
             #toc-div .level2 a {color: teal;}
             #toc-div .level3 a {color: maroon;}
-            .protocol-name { font-size: 20px; border: 3px solid black; border-radius: 5px; padding: 5px; }
+            .protocol-name {
+               font-size: 20px;
+               border: 3px solid black;
+               border-radius: 5px;
+               padding: 5px;
+               margin: 0 !important;
+            }
+            .protocol-div div {margin-left: 10px;}
             .interface-name {color: green;}
             .request-name, .event-name, .enum-name {color: maroon; font-size: 13px;}
             .requests-div, .events-div, .enums-div {border: 2px solid silver; box-shadow: 2px 2px 0px gold; padding-bottom: 10px; margin-bottom: 5px;}
