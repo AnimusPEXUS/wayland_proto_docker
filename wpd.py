@@ -2,6 +2,7 @@ import sys
 import os.path
 import lxml.etree
 import getopt
+import functools
 from lxml.builder import E as LBE
 
 import yaml
@@ -14,6 +15,14 @@ DATA_TYPES = [
     'int', 'uint', 'fixed', 'object',
     'new_id', 'string', 'array', 'fd', 'enum'
 ]
+
+STABILITY_ORDER = ['stable', 'staging', 'unstable', 'unknown']
+
+KNOWN_STABLE = ['wayland.xml']
+KNOWN_STAGING = []
+KNOWN_UNSTABLE = []
+
+PREDEFINED_ORDER = ['wayland.xml']
 
 
 def apply_common_fields_to_object_from_element(obj, element):
@@ -222,13 +231,52 @@ class ProtocolCollection(CommonFields):
         super().__init__()
         self.protocol_files = []
 
-    def getProtoByName(name):
+    def getProtoByName(self, name):
         ret = []
         for i in self.protocol_files:
             for j in i:
                 if j.name == name:
                     ret.append(j)
         return ret
+
+    def sort_protocol_files(self):
+        self.protocol_files.sort(
+            key=functools.cmp_to_key(self._protocol_files_sorter))
+
+    def _protocol_files_sorter(self, v1, v2):
+        if v1.basename in PREDEFINED_ORDER and v2.basename in PREDEFINED_ORDER:
+            i1 = PREDEFINED_ORDER.index(v1.basename)
+            i2 = PREDEFINED_ORDER.index(v2.basename)
+            if i1 == i2:
+                return 0
+            elif i1 > i2:
+                return 1
+            else:
+                return -1
+
+        elif v1.basename in PREDEFINED_ORDER and v2.basename not in PREDEFINED_ORDER:
+            return -1
+        elif v1.basename not in PREDEFINED_ORDER and v2.basename in PREDEFINED_ORDER:
+            return 1
+
+        else:
+
+            s1 = STABILITY_ORDER.index(v1.calc_stability())
+            s2 = STABILITY_ORDER.index(v2.calc_stability())
+
+            if s1 > s2:
+                return 1
+            elif s1 < s2:
+                return -1
+
+            else:
+
+                if v1.basename > v2.basename:
+                    return 1
+                elif v1.basename < v2.basename:
+                    return -1
+                else:
+                    return 0
 
 
 class ProtocolFile:
@@ -237,6 +285,29 @@ class ProtocolFile:
         self.basename = ''
         self.dirname = ''
         self.protocols = []
+
+    def calc_stability(self):
+        if self.basename in KNOWN_STABLE:
+            return 'stable'
+
+        if self.basename in KNOWN_STAGING:
+            return 'staging'
+
+        if self.basename in KNOWN_UNSTABLE:
+            return 'unstable'
+
+        splitted = self.dirname.split('/')
+
+        if 'stable' in splitted:
+            return 'stable'
+
+        if 'unstable' in splitted:
+            return 'unstable'
+
+        if 'staging' in splitted:
+            return 'staging'
+
+        return 'unknown'
 
 
 class Protocol(CommonFields):
@@ -334,24 +405,35 @@ def parse_xml(filename):
     return key_name, parsed_info
 
 
-def find_all_xml_files(dirname, output_xml_list):
+def find_all_xml_files(dirname):
+
+    ret = []
 
     dirname = os.path.abspath(dirname)
 
-    dirfiles = os.listdir(dirname)
+    dirs_to_check = []
+    dirs_to_check.append('.')
 
-    for i in dirfiles:
+    while len(dirs_to_check) != 0:
+        d = dirs_to_check.pop(0)
 
-        dirname_i = os.path.join(dirname, i)
+        dirfiles = os.listdir(os.path.join(dirname, d))
 
-        if os.path.isdir(dirname_i) and not os.path.islink(dirname_i):
-            find_all_xml_files(dirname_i, output_xml_list)
-            continue
+        for i in dirfiles:
 
-        if os.path.isfile(dirname_i) and not os.path.islink(dirname_i):
-            if i.endswith('.xml'):
-                output_xml_list.append(dirname_i)
-            continue
+            r_path = os.path.join(d, i)
+            a_path = os.path.join(dirname, r_path)
+
+            if os.path.isdir(a_path) and not os.path.islink(a_path):
+                dirs_to_check.append(r_path)
+                continue
+
+            if os.path.isfile(a_path) and not os.path.islink(a_path):
+                if i.endswith('.xml'):
+                    ret.append(r_path)
+                continue
+
+    return ret
 
 
 def generate_html_for_ProtocolCollection(protocol_collection, toc, super_toc):
@@ -362,7 +444,6 @@ def generate_html_for_ProtocolCollection(protocol_collection, toc, super_toc):
 
         proto_file_div = LBE.div('')
         proto_collection_div.append(proto_file_div)
-
 
         for protocol in proto_file.protocols:
 
@@ -732,15 +813,6 @@ def generate_html(obj_tree):
     return ret
 
 
-def calc_doc_stability(name, parsed_info):
-    known_stable = ['wayland']
-
-    if name in known_stable:
-        return 'stable'
-
-    return 'unstable'
-
-
 def gen_sorted_proto_name_list(parsed_docs):
     order_list = ['wayland']
 
@@ -880,17 +952,24 @@ def main():
 
     cwd = os.path.dirname(os.path.abspath(argv[0]))
 
-    xml_files = []
-    find_all_xml_files(cwd, xml_files)
+    xml_files = find_all_xml_files(cwd)
 
     print("parsing xml")
     parsed_docs = dict()
     for i in xml_files:
         k, v = parse_xml(i)
-        if k is not None and v is not None:
-            parsed_docs[k] = v
+        if k is None or v is None:
+            continue
+
+        k_spl = k.split('/')
+        if 'tests' in k_spl:
+            continue
+
+        parsed_docs[k] = v
 
     obj_tree = generate_ProtocolCollection(parsed_docs)
+
+    obj_tree.sort_protocol_files()
 
     del parsed_docs
 
