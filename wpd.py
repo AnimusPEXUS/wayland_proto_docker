@@ -1,12 +1,16 @@
-import sys
 import os.path
-import lxml.etree
-import getopt
+import sys
+
 import functools
-from lxml.builder import E as LBE
+import getopt
+import json
 
 import yaml
-import json
+
+import lxml.etree
+
+from lxml.builder import E as LBE
+
 
 # from yaml import load, dump
 # from yaml import Loader, Dumper
@@ -27,7 +31,7 @@ PREDEFINED_ORDER = ['wayland.xml']
 
 def apply_common_fields_to_object_from_element(obj, element):
 
-    obj.name = element.get('name', '(no name)')
+    obj.name = element.get('name', '')
 
     descr_os = []
     descrs = element.xpath('description')
@@ -206,8 +210,10 @@ def entries_simple_struct(enum):
 
 def common_fields_from_obj_to_simple_struct(lst, obj):
     lst.append(['name', obj.name])
-    lst.append(['description_summary', obj.description_summary])
-    lst.append(['description', obj.description])
+    descriptions = []
+    for i in obj.descriptions:
+        descriptions.append([i.summary, i.text])
+    lst.append(['descriptions', descriptions])
 
 
 class Description:
@@ -650,78 +656,88 @@ def generate_simple_struct(list_of_Protocols):
 
     proto_od = []
 
-    for protocol in list_of_Protocols.protocols:
+    for protocol_file in list_of_Protocols.protocol_files:
 
-        proto_tuple_list = []
+        proto_file_tuple_list = []
+        proto_od.append(['protocol_file', proto_file_tuple_list])
 
-        common_fields_from_obj_to_simple_struct(proto_tuple_list, protocol)
+        proto_file_tuple_list.append(['basename', protocol_file.basename])
+        proto_file_tuple_list.append(['dirname', protocol_file.dirname])
 
-        proto_tuple_list.append(['basename', protocol.basename])
-        proto_tuple_list.append(['dirname', protocol.dirname])
-        # proto_tuple_list.append(['status', protocol.status])
+        protos_tuple_list = []
+        proto_file_tuple_list.append(['protocols', protos_tuple_list])
 
-        interfs_tuple_list = []
-        proto_tuple_list.append(['interfaces', interfs_tuple_list])
+        for protocol in protocol_file.protocols:
 
-        for interface in protocol.interfaces:
+            proto_tuple_list = []
+            protos_tuple_list.append(proto_tuple_list)
 
-            interf_tuple_list = []
-            common_fields_from_obj_to_simple_struct(
-                interf_tuple_list, interface)
+            common_fields_from_obj_to_simple_struct(proto_tuple_list, protocol)
 
-            interf_tuple_list.append(['version', interface.version])
+            # proto_tuple_list.append(['status', protocol.status])
 
-            # work with requests
+            interfs_tuple_list = []
+            proto_tuple_list.append(['interfaces', interfs_tuple_list])
 
-            reqs_tuple_list = []
-            interf_tuple_list.append(['requests', reqs_tuple_list])
+            for interface in protocol.interfaces:
 
-            for request in interface.requests:
-
-                req_tuple_list = []
+                interf_tuple_list = []
                 common_fields_from_obj_to_simple_struct(
-                    req_tuple_list, request)
+                    interf_tuple_list, interface)
 
-                req_tuple_list.append(
-                    ['args', arguments_simple_struct(request)])
+                interf_tuple_list.append(['version', interface.version])
 
-                reqs_tuple_list.append(req_tuple_list)
+                # work with requests
 
-            # work with events
+                reqs_tuple_list = []
+                interf_tuple_list.append(['requests', reqs_tuple_list])
 
-            eves_tuple_list = []
-            interf_tuple_list.append(['events', eves_tuple_list])
+                for request in interface.requests:
 
-            for event in interface.events:
+                    req_tuple_list = []
+                    common_fields_from_obj_to_simple_struct(
+                        req_tuple_list, request)
 
-                eve_tuple_list = []
-                common_fields_from_obj_to_simple_struct(eve_tuple_list, event)
+                    req_tuple_list.append(
+                        ['args', arguments_simple_struct(request)])
 
-                eve_tuple_list.append(
-                    ['args', arguments_simple_struct(event)])
+                    reqs_tuple_list.append(req_tuple_list)
 
-                eves_tuple_list.append(eve_tuple_list)
+                # work with events
 
-            # work with enums
+                eves_tuple_list = []
+                interf_tuple_list.append(['events', eves_tuple_list])
 
-            enus_tuple_list = []
-            interf_tuple_list.append(['enums', enus_tuple_list])
+                for event in interface.events:
 
-            for enum in interface.enums:
+                    eve_tuple_list = []
+                    common_fields_from_obj_to_simple_struct(
+                        eve_tuple_list, event)
 
-                enu_tuple_list = []
-                common_fields_from_obj_to_simple_struct(enu_tuple_list, enum)
+                    eve_tuple_list.append(
+                        ['args', arguments_simple_struct(event)])
 
-                enu_tuple_list.append(
-                    ['entries', entries_simple_struct(enum)])
+                    eves_tuple_list.append(eve_tuple_list)
 
-                enus_tuple_list.append(enu_tuple_list)
+                # work with enums
 
-            # end of works
+                enus_tuple_list = []
+                interf_tuple_list.append(['enums', enus_tuple_list])
 
-            interfs_tuple_list.append(interf_tuple_list)
+                for enum in interface.enums:
 
-        proto_od.append(proto_tuple_list)
+                    enu_tuple_list = []
+                    common_fields_from_obj_to_simple_struct(
+                        enu_tuple_list, enum)
+
+                    enu_tuple_list.append(
+                        ['entries', entries_simple_struct(enum)])
+
+                    enus_tuple_list.append(enu_tuple_list)
+
+                # end of works
+
+                interfs_tuple_list.append(interf_tuple_list)
 
     return proto_od
 
@@ -817,75 +833,83 @@ def generate_html(obj_tree):
         body
     )
 
-    ret = lxml.etree.tostring(html_struct)
+    ret = lxml.etree.tostring(
+        html_struct,
+        pretty_print=True,
+        method='html'
+    )
 
     return ret
 
 
-def gen_sorted_proto_name_list(parsed_docs):
-    order_list = ['wayland']
-
-    ret = []
-
-    for i in order_list:
-        ret.append(i)
-
-    names = list(parsed_docs.keys())
-    names.sort()
-
-    for i in names:
-        if not i in order_list:
-            ret.append(i)
-
-    return ret
+def generate_c_cpp_code(obj_tree):
+    pass
 
 
-def stable_unstable_sort(parsed_docs):
-    order_list = ['wayland']
+# def gen_sorted_proto_name_list(parsed_docs):
+#    order_list = ['wayland']
+#
+#    ret = []
+#
+#    for i in order_list:
+#        ret.append(i)
+#
+#    names = list(parsed_docs.keys())
+#    names.sort()
+#
+#    for i in names:
+#        if not i in order_list:
+#            ret.append(i)
+#
+#    return ret
 
-    stable = []
-    staging = []
-    unstable = []
 
-    stable_no = []
-    staging_no = []
-    unstable_no = []
+# def stable_unstable_sort(parsed_docs):
+#    order_list = ['wayland']
+#
+#    stable = []
+#    staging = []
+#    unstable = []
 
-    for i in order_list:
-        stabilitiy = calc_doc_stability(i, parsed_docs[i])
-        if stabilitiy == 'stable':
-            stable.append(i)
-            continue
-        if stabilitiy == 'staging':
-            staging.append(i)
-            continue
-        if stabilitiy == 'unstable':
-            unstable.append(i)
-            continue
+#    stable_no = []
+#    staging_no = []
+#    unstable_no = []
 
-    for i in parsed_docs:
-        if not i in order_list:
+#    for i in order_list:
+#        stabilitiy = calc_doc_stability(i, parsed_docs[i])
+#        if stabilitiy == 'stable':
+#            stable.append(i)
+#            continue
+#        if stabilitiy == 'staging':
+#            staging.append(i)
+#            continue
+#        if stabilitiy == 'unstable':
+#            unstable.append(i)
+#            continue
 
-            stabilitiy = calc_doc_stability(i, parsed_docs[i])
-            if stabilitiy == 'stable':
-                stable_no.append(i)
-                continue
-            if stabilitiy == 'staging':
-                staging_no.append(i)
-                continue
-            if stabilitiy == 'unstable':
-                unstable_no.append(i)
-                continue
+#    for i in parsed_docs:
+#        if not i in order_list:
 
-    stable_no.sort()
-    staging_no.sort()
-    unstable_no.sort()
-
-    stable += stable_no
-    staging += staging_no
-    unstable += unstable_no
-
-    return stable, staging, unstable
+#            stabilitiy = calc_doc_stability(i, parsed_docs[i])
+#            if stabilitiy == 'stable':
+#                stable_no.append(i)
+#                continue
+#            if stabilitiy == 'staging':
+#                staging_no.append(i)
+#                continue
+#            if stabilitiy == 'unstable':
+#                unstable_no.append(i)
+#                continue
+#
+#    stable_no.sort()
+#    staging_no.sort()
+#    unstable_no.sort()
+#
+#    stable += stable_no
+#    staging += staging_no
+#    unstable += unstable_no
+#
+#    return stable, staging, unstable
 
 
 def print_help():
@@ -963,35 +987,46 @@ def main():
 
     xml_files = find_all_xml_files(cwd)
 
-    print("parsing xml")
+    print("found {} xml files".format(len(xml_files)))
+
+    print("parsing xml..")
     parsed_docs = dict()
     for i in xml_files:
+        print(f"  {i}: ", end='')
+        i = os.path.join(cwd, i)
         k, v = parse_xml(i)
         if k is None or v is None:
+            print("  fail")
             continue
 
         k_spl = k.split('/')
         if 'tests' in k_spl:
+            print("  fail")
             continue
 
+        print("  ok")
         parsed_docs[k] = v
 
+    print("parsing result: {} protocol files".format(len(parsed_docs)))
+
+    print("generating tree..")
     obj_tree = generate_ProtocolCollection(parsed_docs)
 
+    print("sorting..")
     obj_tree.sort_protocol_files()
 
     del parsed_docs
 
     if target == 'html':
+        print("generating html")
 
         txt = generate_html(obj_tree)
 
         with open(output, 'wb') as f:
             f.write(txt)
 
-        return
-
     elif target == 'yaml':
+        print("generating yaml")
 
         struct = generate_simple_struct(obj_tree)
 
@@ -1000,9 +1035,8 @@ def main():
         with open(output, 'w') as f:
             f.write(txt)
 
-        return
-
     elif target == 'json':
+        print("generating json")
 
         struct = generate_simple_struct(obj_tree)
 
@@ -1011,10 +1045,17 @@ def main():
         with open(output, 'w') as f:
             f.write(txt)
 
-        return
+    elif target in ['c', 'c++']:
+        print(f"generating {target}")
+        txt = generate_c_cpp_code(obj_tree)
+
+        with open(output, 'w') as f:
+            f.write(txt)
 
     else:
         raise RuntimeError("invalid target")
+
+    print("exit ok")
 
 
 if __name__ == '__main__':
