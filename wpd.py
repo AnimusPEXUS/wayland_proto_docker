@@ -28,12 +28,15 @@ KNOWN_UNSTABLE = []
 
 PREDEFINED_ORDER = ['wayland.xml']
 
+CPP_DISABLE_TEXTS = True
+
 
 def apply_common_fields_to_object_from_element(obj, element):
 
     obj.name = element.get('name', '')
 
     descr_os = []
+
     descrs = element.xpath('description')
 
     for descr in descrs:
@@ -49,14 +52,18 @@ def apply_common_fields_to_object_from_element(obj, element):
     obj.descriptions = descr_os
 
     copy_os = []
+
     copys = element.xpath('copyright')
 
     for copy in copys:
         t = copy.text
         if t is None:
             t = ""
+        d = Copyright()
+        d.text = t.strip()
+        d.name = ''
 
-        copy_os.append(t)
+        copy_os.append(d)
 
     obj.copyrights = copy_os
 
@@ -165,10 +172,10 @@ def apply_args_to_object(obj, element):
     args = element.xpath('arg')
     for arg in args:
         arg_o = Argument()
-        arg_o.name = arg.get('name', '(no name)')
-        arg_o.type_ = arg.get('type', '(no type)')
-        arg_o.interface = arg.get('interface', '(no interface)')
-        arg_o.summary = arg.get('summary', '(no summary)')
+        arg_o.name = arg.get('name', '')
+        arg_o.type_ = arg.get('type', '')
+        arg_o.interface = arg.get('interface', '')
+        arg_o.summary = arg.get('summary', '')
 
         obj.arguments.append(arg_o)
 
@@ -216,11 +223,48 @@ def common_fields_from_obj_to_simple_struct(lst, obj):
     lst.append(['descriptions', descriptions])
 
 
+class Copyright:
+
+    def __init__(self):
+        self.name = ''
+        self.text = ''
+
+    def gen_cpp(self):
+        n = ""
+        t = ""
+
+        if not CPP_DISABLE_TEXTS:
+            n = self.name
+            t = self.text
+
+        return '''
+        Copyright{
+           .name="'''+n+'''",
+           .text=R"+++('''+t+''')+++"
+        }
+        '''
+
+
 class Description:
 
     def __init__(self):
         self.text = ''
         self.summary = ''
+
+    def gen_cpp(self):
+        s = ""
+        t = ""
+
+        if not CPP_DISABLE_TEXTS:
+            s = self.summary
+            t = self.text
+
+        return '''
+        Description{
+           .summary=R"+++('''+s+''')+++",
+           .text=R"+++('''+t+''')+++"
+           }
+           '''
 
 
 class CommonFields:
@@ -230,11 +274,35 @@ class CommonFields:
         self.descriptions = []
         self.copyrights = []
 
+    def gen_cpp(self):
 
-class ProtocolCollection(CommonFields):
+        descriptions_code_lst = []
+
+        for i in self.descriptions:
+            descriptions_code_lst.append(i.gen_cpp())
+
+        descriptions_code = ','.join(descriptions_code_lst)
+
+        copyrights_code_lst = []
+
+        for i in self.copyrights:
+            copyrights_code_lst.append(i.gen_cpp())
+
+        copyrights_code = ','.join(copyrights_code_lst)
+
+        ret = '''
+CommonFields{
+        .name="'''+self.name+'''",
+        .descriptions={'''+descriptions_code+'''},
+        .copyrights={'''+copyrights_code+'''}
+    }
+'''
+        return ret
+
+
+class ProtocolCollection:
 
     def __init__(self):
-        super().__init__()
         self.protocol_files = []
 
     def getProtoByName(self, name):
@@ -284,10 +352,32 @@ class ProtocolCollection(CommonFields):
                 else:
                     return 0
 
+    def gen_cpp(self):
 
-class ProtocolFile:
+        protocol_files_lst = []
+        for i in self.protocol_files:
+            protocol_files_lst.append(i.gen_cpp())
+
+        protocol_files_txt = ','.join(protocol_files_lst)
+
+        ret = '''
+const ProtocolCollection WAYLAND_PROTOCOL_COLLECTION =
+{
+   .protocol_files = {
+''' + protocol_files_txt + '''
+   }
+};
+'''
+        return ret
+
+
+class ProtocolFile(CommonFields):
+
+    # TODO: read common fields from xml
+    # TODO: write common fields to outputs
 
     def __init__(self):
+        super().__init__()
         self.basename = ''
         self.dirname = ''
         self.protocols = []
@@ -315,6 +405,32 @@ class ProtocolFile:
 
         return 'unknown'
 
+    def gen_cpp(self):
+
+        protocols_code = ''
+        protocols_code_lst = []
+
+        for i in self.protocols:
+            protocols_code_lst.append(i.gen_cpp())
+
+        protocols_code = ','.join(protocols_code_lst)
+
+        del protocols_code_lst
+
+        ret = '''
+
+        {
+        '''+super().gen_cpp()+''',
+        "'''+self.basename+'''",
+        "'''+self.dirname+'''",
+        {'''+protocols_code+'''}
+        }
+
+
+'''
+
+        return ret
+
 
 class Protocol(CommonFields):
 
@@ -322,6 +438,25 @@ class Protocol(CommonFields):
         super().__init__()
         # self.status = 'unstable'
         self.interfaces = []
+
+    def gen_cpp(self):
+
+        interfaces_code_list = []
+
+        for i in self.interfaces:
+            interfaces_code_list.append(i.gen_cpp())
+
+        interfaces_code = ','.join(interfaces_code_list)
+
+        ret = '''
+        Protocol(
+            '''+super().gen_cpp()+''',
+            {'''+interfaces_code+'''}
+            )
+'''
+        #
+
+        return ret
 
 
 class Interface(CommonFields):
@@ -333,6 +468,37 @@ class Interface(CommonFields):
         self.events = []
         self.enums = []
 
+    def gen_cpp(self):
+
+        requests_code_list = []
+        events_code_list = []
+        enums_code_list = []
+
+        for i in self.requests:
+            requests_code_list.append(i.gen_cpp())
+
+        for i in self.events:
+            events_code_list.append(i.gen_cpp())
+
+        for i in self.enums:
+            enums_code_list.append(i.gen_cpp())
+
+        requests_code = ','.join(requests_code_list)
+        events_code = ','.join(events_code_list)
+        enums_code = ','.join(enums_code_list)
+
+        ret = '''
+        Interface(
+        '''+super().gen_cpp()+''',
+        "'''+self.version+'''",
+        {'''+requests_code+'''},
+        {'''+events_code+'''},
+        {'''+enums_code+'''}
+        )
+'''
+
+        return ret
+
 
 class Message(CommonFields):
 
@@ -340,20 +506,32 @@ class Message(CommonFields):
         super().__init__()
         self.arguments = []
 
+    def gen_cpp(self):
+
+        arguments_code_list = []
+
+        for i in self.arguments:
+            arguments_code_list.append(i.gen_cpp())
+
+        arguments_code = ','.join(arguments_code_list)
+
+        ret = '''
+        Message(
+            '''+super().gen_cpp()+''',
+            {'''+arguments_code+'''}
+            )
+'''
+        return ret
+
 
 class Request(Message):
-    pass
+    def __init__(self):
+        super().__init__()
 
 
 class Event(Message):
-    pass
-
-
-class Enum(CommonFields):
-
     def __init__(self):
         super().__init__()
-        self.entries = []
 
 
 class Argument:
@@ -364,12 +542,66 @@ class Argument:
         self.interface = ''
         self.summary = ''
 
+    def gen_cpp(self):
+
+        type_txt = 'wt_'+self.type_
+
+        summary = ""
+        if not CPP_DISABLE_TEXTS:
+            summary = self.summary
+
+        return '''
+        Argument{
+        .name="'''+self.name+'''",
+        .type='''+type_txt+''',
+        .interface="'''+self.interface+'''",
+        .summary="'''+summary+'''",
+        }
+        '''
+
+
+class Enum(CommonFields):
+
+    def __init__(self):
+        super().__init__()
+        self.entries = []
+
+    def gen_cpp(self):
+        entries_code_list = []
+
+        for i in self.entries:
+            entries_code_list.append(i.gen_cpp())
+
+        entries_code = ','.join(entries_code_list)
+
+        ret = '''
+        Enum(
+            '''+super().gen_cpp()+''',
+            {'''+entries_code+'''}
+            )
+'''
+        return ret
+
 
 class Entry:
     def __init__(self):
         self.name = ''
         self.value = ''
         self.summary = ''
+
+    def gen_cpp(self):
+
+        summary = ""
+        if not CPP_DISABLE_TEXTS:
+            summary = self.summary
+
+        return '''
+        Entry{
+        .name="'''+self.name+'''",
+        .value="'''+self.value+'''",
+        .summary="'''+summary+'''",
+        }
+        '''
 
 
 def parse_xml(filename):
@@ -634,9 +866,9 @@ def generate_ProtocolFile_for_parsed(parsed_info):
                 entrys = enum.xpath('entry')
                 for entry in entrys:
                     entry_o = Entry()
-                    entry_o.name = entry.get('name', '(no name)')
-                    entry_o.value = entry.get('value', '(no value)')
-                    entry_o.summary = entry.get('summary', '(no summary)')
+                    entry_o.name = entry.get('name', '')
+                    entry_o.value = entry.get('value', '')
+                    entry_o.summary = entry.get('summary', '')
 
                     enum_o.entries.append(entry_o)
 
@@ -842,74 +1074,24 @@ def generate_html(obj_tree):
     return ret
 
 
-def generate_c_cpp_code(obj_tree):
-    pass
+def generate_cpp_code(obj_tree):
 
+    # TODO: add generation timestamp
 
-# def gen_sorted_proto_name_list(parsed_docs):
-#    order_list = ['wayland']
-#
-#    ret = []
-#
-#    for i in order_list:
-#        ret.append(i)
-#
-#    names = list(parsed_docs.keys())
-#    names.sort()
-#
-#    for i in names:
-#        if not i in order_list:
-#            ret.append(i)
-#
-#    return ret
+    ret = '''#ifndef WAYROUND_I2P_20240211_135005_438825
+#define WAYROUND_I2P_20240211_135005_438825
 
+/*
+    WARNING! This file GENERTED using
+             https://github.com/AnimusPEXUS/wayland_proto_docker
+             tool.
+*/
 
-# def stable_unstable_sort(parsed_docs):
-#    order_list = ['wayland']
-#
-#    stable = []
-#    staging = []
-#    unstable = []
+''' + obj_tree.gen_cpp() + '''
 
-#    stable_no = []
-#    staging_no = []
-#    unstable_no = []
-
-#    for i in order_list:
-#        stabilitiy = calc_doc_stability(i, parsed_docs[i])
-#        if stabilitiy == 'stable':
-#            stable.append(i)
-#            continue
-#        if stabilitiy == 'staging':
-#            staging.append(i)
-#            continue
-#        if stabilitiy == 'unstable':
-#            unstable.append(i)
-#            continue
-
-#    for i in parsed_docs:
-#        if not i in order_list:
-
-#            stabilitiy = calc_doc_stability(i, parsed_docs[i])
-#            if stabilitiy == 'stable':
-#                stable_no.append(i)
-#                continue
-#            if stabilitiy == 'staging':
-#                staging_no.append(i)
-#                continue
-#            if stabilitiy == 'unstable':
-#                unstable_no.append(i)
-#                continue
-#
-#    stable_no.sort()
-#    staging_no.sort()
-#    unstable_no.sort()
-#
-#    stable += stable_no
-#    staging += staging_no
-#    unstable += unstable_no
-#
-#    return stable, staging, unstable
+#endif
+'''
+    return ret
 
 
 def print_help():
@@ -962,7 +1144,7 @@ def main():
 
     target = args[0]
 
-    acceptable_targets = ['html', 'yaml', 'json']
+    acceptable_targets = ['html', 'yaml', 'json', 'c++']
 
     if not target in acceptable_targets:
         raise RuntimeError(
@@ -975,6 +1157,8 @@ def main():
             output = 'wayland-protocols.yaml'
         elif target == 'json':
             output = 'wayland-protocols.json'
+        elif target == 'c++':
+            output = 'wayland_protocol_generated.hpp'
         else:
             raise RuntimeError("invalid target")
 
@@ -1045,9 +1229,9 @@ def main():
         with open(output, 'w') as f:
             f.write(txt)
 
-    elif target in ['c', 'c++']:
-        print(f"generating {target}")
-        txt = generate_c_cpp_code(obj_tree)
+    elif target == 'c++':
+        print(f"generating c++ header file")
+        txt = generate_cpp_code(obj_tree)
 
         with open(output, 'w') as f:
             f.write(txt)
