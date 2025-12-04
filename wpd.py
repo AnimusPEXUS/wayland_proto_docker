@@ -17,7 +17,7 @@ from lxml.builder import E as LBE
 
 DATA_TYPES = [
     'int', 'uint', 'fixed', 'object',
-    'new_id', 'string', 'array', 'fd', 'enum'
+    'new_id', 'string', 'array', 'fd', 'enum' 
 ]
 
 STABILITY_ORDER = ['stable', 'staging', 'unstable', 'unknown']
@@ -1081,6 +1081,8 @@ def generate_cpp_code(obj_tree):
     ret = '''#ifndef WAYROUND_I2P_20240211_135005_438825
 #define WAYROUND_I2P_20240211_135005_438825
 
+namespace wayround_i2p::waylandcc {
+    
 /*
     WARNING! This file GENERTED using
              https://github.com/AnimusPEXUS/wayland_proto_docker
@@ -1088,6 +1090,8 @@ def generate_cpp_code(obj_tree):
 */
 
 ''' + obj_tree.gen_cpp() + '''
+
+}
 
 #endif
 '''
@@ -1113,11 +1117,9 @@ def print_help():
 
      json      - same as yaml, but generates json
 
-     c or c++  - generates C/C++ compatible .h (or .hpp) include file
+     c++       - generates C++ .hpp include file
                  to be included in waylandcc project
                  (see https://github.com/AnimusPEXUS/waylandcc).
-                 (generated file' contents is identical, just
-                  extension in filename is different)
 """.format(cmd=sys.argv[0]))
 
 
