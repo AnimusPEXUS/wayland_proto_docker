@@ -17,7 +17,7 @@ from lxml.builder import E as LBE
 
 DATA_TYPES = [
     'int', 'uint', 'fixed', 'object',
-    'new_id', 'string', 'array', 'fd', 'enum' 
+    'new_id', 'string', 'array', 'fd', 'enum'
 ]
 
 STABILITY_ORDER = ['stable', 'staging', 'unstable', 'unknown']
